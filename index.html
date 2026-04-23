@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Square Survival</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #222; /* Bakgrunnen utenfor selve "TV-en" */
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+
+        /* Spillebrettet med den tykke TV-rammen */
+        canvas {
+            display: block;
+            margin: 0 auto;
+            background-color: #111;
+            border: 50px solid #444; /* Rammen du ba om */
+            box-sizing: border-box;
+            height: 100vh;
+            width: 100vw;
+            max-width: 1000px;
+            max-height: 800px;
+        }
+
+        /* UI Overlay for knapper og tekst */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Sørger for at UI ikke blokkerer spillet */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #top-right {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            pointer-events: auto;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+            border: 2px solid #555;
+        }
+
+        #wave-info {
+            position: absolute;
+            top: 15px;
+            left: 20px;
+            font-size: 24px;
+            font-weight: bold;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        #next-wave-btn {
+            padding: 15px 30px;
+            font-size: 20px;
+            cursor: pointer;
+            display: none; /* Skjult under spilling */
+            pointer-events: auto;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        
+        #next-wave-btn:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div id="wave-info">Wave: <span id="wave-number">1</span></div>
+        <div id="top-right">
+            <label>
+                <input type="checkbox" id="auto-start" checked> Auto Start Wave
+            </label>
+        </div>
+        <button id="next-wave-btn">Start Next Wave (<span id="timer">5</span>)</button>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+
+        // Juster canvas størrelse slik at den passer inni CSS-rammen
+        function resizeCanvas() {
+            canvas.width = canvas.clientWidth - 100; // -100px for å kompensere for 50px border på hver side
+            canvas.height = canvas.clientHeight - 100;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        // Spilleren (firkanten)
+        const player = {
+            x: canvas.width / 2,
+            y: canvas.height / 2,
+            size: 20,
+            speed: 4,
+            color: "cyan"
+        };
+
+        const bullets = [];
+        const slimes = [];
+        const keys = {};
+
+        window.addEventListener("keydown", (e) => keys[e.key.toLowerCase()] = true);
+        window.addEventListener("keyup", (e) => keys[e.key.toLowerCase()] = false);
+
+        // Skyting (Tast 'E') med AUTO-AIM
+        window.addEventListener("keydown", (e) => {
+            if (e.key.toLowerCase() === "e" && gameState === "playing") {
+                shootAutoAim();
+            }
+        });
+
+        function shootAutoAim() {
+            if (slimes.length === 0) return; // Ikke skyt hvis det ikke er fiender
+
+            let nearestSlime = null;
+            let minDistance = Infinity;
+
+            // Finn den nærmeste slimen
+            for (let s of slimes) {
+                // Pytagoras for å finne avstand
+                let dist = Math.hypot(s.x - player.x, s.y - player.y);
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    nearestSlime = s;
+                }
+            }
+
+            // Hvis vi fant en slime, regn ut vinkelen og skyt!
+            if (nearestSlime) {
+                const angle = Math.atan2(nearestSlime.y - player.y, nearestSlime.x - player.x);
+                bullets.push({
+                    x: player.x,
+                    y: player.y,
+                    dx: Math.cos(angle) * 10, // Fart på kulen
+                    dy: Math.sin(angle) * 10,
+                    size: 5,
+                    color: "yellow",
+                    damage: 1
+                });
+            }
+        }
+
+        // --- WAVE SYSTEM ---
+        let wave = 1;
+        let gameState = "playing"; // "playing" eller "waiting"
+        let slimesToSpawn = 3;
+        let timeToNextWave = 5;
+        let waitInterval;
+
+        const waveElement = document.getElementById("wave-number");
+        const autoStartCheckbox = document.getElementById("auto-start");
+        const nextWaveBtn = document.getElementById("next-wave-btn");
+        const timerElement = document.getElementById("timer");
+
+        // Regn ut antall slimes
+        function getSlimeCountForWave(w) {
+            if (w === 1) return 3;
+            if (w === 2) return 5;
+            if (w === 3) return 8;
+            
+            // Fra wave 4: forrige wave + 2 + wave nr
+            let count = 8; // wave 3
+            for (let i = 4; i <= w; i++) {
+                count += (2 + i);
+            }
+            return count;
+        }
+
+        function spawnSlimes(count) {
+            for (let i = 0; i < count; i++) {
+                // Spawn langs en tilfeldig kant (oppe, nede, venstre, høyre)
+                let x, y;
+                if (Math.random() < 0.5) {
+                    x = Math.random() < 0.5 ? -20 : canvas.width + 20;
+                    y = Math.random() * canvas.height;
+                } else {
+                    x = Math.random() * canvas.width;
+                    y = Math.random() < 0.5 ? -20 : canvas.height + 20;
+                }
+
+                slimes.push({
+                    x: x,
+                    y: y,
+                    size: 15,
+                    speed: Math.random() * 0.5 + 0.5, // Treige (0.5 til 1.0)
+                    hp: 2,
+                    color: "lime"
+                });
+            }
+        }
+
+        // Start første wave
+        spawnSlimes(slimesToSpawn);
+
+        function startWavePause() {
+            gameState = "waiting";
+            timeToNextWave = 5;
+            nextWaveBtn.style.display = "block";
+            timerElement.innerText = timeToNextWave;
+
+            waitInterval = setInterval(() => {
+                timeToNextWave--;
+                timerElement.innerText = timeToNextWave;
+                
+                if (timeToNextWave <= 0) {
+                    if (autoStartCheckbox.checked) {
+                        startNextWave();
+                    } else {
+                        clearInterval(waitInterval);
+                        timerElement.innerText = "Klar!";
+                    }
+                }
+            }, 1000);
+        }
+
+        function startNextWave() {
+            clearInterval(waitInterval);
+            nextWaveBtn.style.display = "none";
+            wave++;
+            waveElement.innerText = wave;
+            slimesToSpawn = getSlimeCountForWave(wave);
+            spawnSlimes(slimesToSpawn);
+            gameState = "playing";
+        }
+
+        nextWaveBtn.addEventListener("click", startNextWave);
+
+        // --- GAME LOOP ---
+        function update() {
+            if (gameState === "playing") {
+                // Spillerbevegelse med kollisjon mot veggene
+                if ((keys["w"] || keys["arrowup"]) && player.y - player.size/2 > 0) player.y -= player.speed;
+                if ((keys["s"] || keys["arrowdown"]) && player.y + player.size/2 < canvas.height) player.y += player.speed;
+                if ((keys["a"] || keys["arrowleft"]) && player.x - player.size/2 > 0) player.x -= player.speed;
+                if ((keys["d"] || keys["arrowright"]) && player.x + player.size/2 < canvas.width) player.x += player.speed;
+
+                // Oppdater Kuler
+                for (let i = bullets.length - 1; i >= 0; i--) {
+                    bullets[i].x += bullets[i].dx;
+                    bullets[i].y += bullets[i].dy;
+
+                    // Fjern kuler som treffer rammen
+                    if (bullets[i].x < 0 || bullets[i].x > canvas.width || bullets[i].y < 0 || bullets[i].y > canvas.height) {
+                        bullets.splice(i, 1);
+                    }
+                }
+
+                // Oppdater Slimes og sjekk kollisjon
+                for (let i = slimes.length - 1; i >= 0; i--) {
+                    let s = slimes[i];
+                    
+                    // Følg etter spiller
+                    let angle = Math.atan2(player.y - s.y, player.x - s.x);
+                    s.x += Math.cos(angle) * s.speed;
+                    s.y += Math.sin(angle) * s.speed;
+
+                    // Kollisjon mellom kuler og slimes
+                    for (let j = bullets.length - 1; j >= 0; j--) {
+                        let b = bullets[j];
+                        
+                        // Enkel avstandssjekk for kollisjon
+                        let dist = Math.hypot(b.x - s.x, b.y - s.y);
+                        if (dist < s.size/2 + b.size) {
+                            s.hp -= b.damage; // Slime tar 1 skade
+                            bullets.splice(j, 1); // Fjern kulen
+                            
+                            if (s.hp <= 0) {
+                                slimes.splice(i, 1); // Fjern slime
+                                break; // Avbryt loopen, slimen er allerede død
+                            }
+                        }
+                    }
+                }
+
+                // Sjekk om wave er ferdig renset
+                if (slimes.length === 0 && slimesToSpawn > 0) {
+                    startWavePause();
+                }
+            }
+        }
+
+        function draw() {
+            // Tøm skjermen
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Tegn Spiller
+            ctx.fillStyle = player.color;
+            ctx.fillRect(player.x - player.size/2, player.y - player.size/2, player.size, player.size);
+
+            // Tegn Slimes
+            ctx.fillStyle = "lime";
+            slimes.forEach(s => {
+                ctx.fillRect(s.x - s.size/2, s.y - s.size/2, s.size, s.size);
+            });
+
+            // Tegn Kuler
+            ctx.fillStyle = "yellow";
+            bullets.forEach(b => {
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Start loopen
+        gameLoop();
+    </script>
+</body>
+</html>
