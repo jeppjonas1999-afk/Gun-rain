@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Square Survival V2</title>
+    <title>Square Survival V3 - Slime Evolution</title>
     <style>
         body {
             margin: 0;
@@ -38,23 +38,32 @@
         }
 
         #top-ui-container {
-            margin-top: 10px;
+            margin-top: 15px;
             display: flex;
             flex-direction: column;
             align-items: center;
             gap: 10px;
             pointer-events: auto;
-        }
-
-        #top-right {
-            position: absolute;
-            top: 15px;
-            right: 20px;
-            pointer-events: auto;
             background: rgba(0,0,0,0.7);
-            padding: 10px;
+            padding: 10px 20px;
             border-radius: 5px;
             border: 2px solid #555;
+        }
+
+        #health-bar-container {
+            width: 200px;
+            height: 20px;
+            background-color: #555;
+            border: 2px solid #fff;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        #health-bar-fill {
+            height: 100%;
+            width: 100%;
+            background-color: #ff3333;
+            transition: width 0.2s;
         }
 
         #wave-info {
@@ -68,22 +77,52 @@
             border-radius: 5px;
         }
 
+        #top-right {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            pointer-events: auto;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+            border: 2px solid #555;
+        }
+
         #next-wave-btn {
-            padding: 12px 25px;
-            font-size: 18px;
+            padding: 10px 20px;
+            font-size: 16px;
             cursor: pointer;
-            visibility: hidden; /* Bruker visibility for å ikke dytte på layouten */
+            visibility: hidden; 
             background-color: #4CAF50;
             color: white;
             border: none;
             border-radius: 5px;
             font-weight: bold;
-            box-shadow: 0 4px #2e6631;
         }
         
-        #next-wave-btn:active {
-            box-shadow: 0 2px #2e6631;
-            transform: translateY(2px);
+        #next-wave-btn:hover { background-color: #45a049; }
+        
+        #game-over {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 40px;
+            font-weight: bold;
+            color: red;
+            background: rgba(0,0,0,0.8);
+            padding: 30px;
+            border: 4px solid red;
+            text-align: center;
+            border-radius: 10px;
+            pointer-events: auto;
+        }
+        #game-over button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 20px;
+            cursor: pointer;
         }
     </style>
 </head>
@@ -93,13 +132,20 @@
         <div id="wave-info">Wave: <span id="wave-number">1</span></div>
         
         <div id="top-ui-container">
+            <div style="font-weight: bold; margin-bottom: 5px;">HP: <span id="hp-text">15</span>/15</div>
+            <div id="health-bar-container">
+                <div id="health-bar-fill"></div>
+            </div>
             <button id="next-wave-btn">Start Next Wave (<span id="timer">5</span>)</button>
         </div>
 
         <div id="top-right">
-            <label>
-                <input type="checkbox" id="auto-start"> Auto Start Wave
-            </label>
+            <label><input type="checkbox" id="auto-start"> Auto Start</label>
+        </div>
+        
+        <div id="game-over">
+            DU DØDE!<br>
+            <button onclick="location.reload()">Prøv igjen</button>
         </div>
     </div>
 
@@ -120,17 +166,20 @@
             x: canvas.width / 2,
             y: canvas.height / 2,
             size: 20,
-            speed: 2, // Halvert fart (var 4)
-            color: "cyan"
+            speed: 2,
+            color: "cyan",
+            hp: 15,
+            maxHp: 15,
+            lastHitTime: 0,
+            iFrames: 500 // 0.5 sekunder
         };
 
         const bullets = [];
-        const slimes = [];
+        let slimes = [];
         const keys = {};
         
-        // Cooldown variabler
         let lastShotTime = 0;
-        const shootCooldown = 500; // 0.5 sekunder i millisekunder
+        const shootCooldown = 500; 
 
         window.addEventListener("keydown", (e) => keys[e.key.toLowerCase()] = true);
         window.addEventListener("keyup", (e) => keys[e.key.toLowerCase()] = false);
@@ -138,7 +187,6 @@
         window.addEventListener("keydown", (e) => {
             if (e.key.toLowerCase() === "e") {
                 const currentTime = Date.now();
-                // Sjekk om det har gått nok tid siden forrige skudd
                 if (currentTime - lastShotTime >= shootCooldown && gameState === "playing") {
                     shootAutoAim();
                     lastShotTime = currentTime;
@@ -148,7 +196,6 @@
 
         function shootAutoAim() {
             if (slimes.length === 0) return;
-
             let nearestSlime = null;
             let minDistance = Infinity;
 
@@ -163,79 +210,80 @@
             if (nearestSlime) {
                 const angle = Math.atan2(nearestSlime.y - player.y, nearestSlime.x - player.x);
                 bullets.push({
-                    x: player.x,
-                    y: player.y,
+                    x: player.x, y: player.y,
                     dx: Math.cos(angle) * 10,
                     dy: Math.sin(angle) * 10,
-                    size: 5,
-                    color: "yellow",
-                    damage: 1
+                    size: 5, color: "yellow", damage: 1
                 });
             }
         }
 
+        // --- SLIME LOGIKK (Stages, Stats, Splitting) ---
+        function getSlimeStats(stage) {
+            const colors = {1: "lime", 2: "red", 3: "purple", 4: "yellow"};
+            return {
+                stage: stage,
+                hp: 1 + stage,
+                maxHp: 1 + stage,
+                damage: stage,
+                size: 15 * Math.pow(1.5, stage - 1),
+                color: colors[stage] || "white",
+                speed: Math.random() * 0.3 + 0.4,
+                lastMergeCheck: Date.now() // Timer for fuse-sjekk
+            };
+        }
+
+        function createSlime(x, y, stage) {
+            let stats = getSlimeStats(stage);
+            return { x: x, y: y, ...stats };
+        }
+
         let wave = 1;
-        let gameState = "playing"; 
+        let gameState = "playing"; // "playing", "waiting", "gameover"
         let slimesToSpawn = 3;
         let timeToNextWave = 5;
         let waitInterval;
 
-        const waveElement = document.getElementById("wave-number");
-        const autoStartCheckbox = document.getElementById("auto-start");
-        const nextWaveBtn = document.getElementById("next-wave-btn");
-        const timerElement = document.getElementById("timer");
-
-        function getSlimeCountForWave(w) {
-            if (w === 1) return 3;
-            if (w === 2) return 5;
-            if (w === 3) return 8;
-            let count = 8;
-            for (let i = 4; i <= w; i++) {
-                count += (2 + i);
-            }
-            return count;
+        function updateUI() {
+            document.getElementById("hp-text").innerText = player.hp;
+            const hpPercent = (player.hp / player.maxHp) * 100;
+            document.getElementById("health-bar-fill").style.width = hpPercent + "%";
         }
 
         function spawnSlimes(count) {
-            for (let i = 0; i < count; i++) {
-                let x, y;
-                if (Math.random() < 0.5) {
-                    x = Math.random() < 0.5 ? -20 : canvas.width + 20;
-                    y = Math.random() * canvas.height;
-                } else {
-                    x = Math.random() * canvas.width;
-                    y = Math.random() < 0.5 ? -20 : canvas.height + 20;
-                }
+            // Sjanse for å spawne som en høyere stage rett fra start, øker per wave
+            let upgradeChance = Math.min(wave * 0.05, 0.4); // Maks 40% sjanse 
 
-                slimes.push({
-                    x: x,
-                    y: y,
-                    size: 15,
-                    speed: Math.random() * 0.3 + 0.4, // Enda litt treigere for balanse
-                    hp: 2,
-                    color: "lime"
-                });
+            for (let i = 0; i < count; i++) {
+                let x = Math.random() < 0.5 ? -30 : canvas.width + 30;
+                let y = Math.random() * canvas.height;
+                
+                let startStage = 1;
+                if (Math.random() < upgradeChance) startStage = 2; // Kan starte som stage 2
+                
+                slimes.push(createSlime(x, y, startStage));
             }
         }
 
         spawnSlimes(slimesToSpawn);
 
         function startWavePause() {
+            if (gameState === "gameover") return;
             gameState = "waiting";
             timeToNextWave = 5;
-            nextWaveBtn.style.visibility = "visible";
-            timerElement.innerText = timeToNextWave;
+            document.getElementById("next-wave-btn").style.visibility = "visible";
+            document.getElementById("timer").innerText = timeToNextWave;
 
             waitInterval = setInterval(() => {
                 timeToNextWave--;
-                timerElement.innerText = timeToNextWave;
+                document.getElementById("timer").innerText = timeToNextWave;
                 
                 if (timeToNextWave <= 0) {
-                    if (autoStartCheckbox.checked) {
+                    if (document.getElementById("auto-start").checked) {
                         startNextWave();
                     } else {
                         clearInterval(waitInterval);
-                        timerElement.innerText = "Klar!";
+                        document.getElementById("timer").innerText = "Klar!";
                     }
                 }
             }, 1000);
@@ -243,24 +291,39 @@
 
         function startNextWave() {
             clearInterval(waitInterval);
-            nextWaveBtn.style.visibility = "hidden";
+            document.getElementById("next-wave-btn").style.visibility = "hidden";
             wave++;
-            waveElement.innerText = wave;
-            slimesToSpawn = getSlimeCountForWave(wave);
+            document.getElementById("wave-number").innerText = wave;
+            
+            // Regn ut antall for wave
+            let count = 3;
+            if (wave === 2) count = 5;
+            else if (wave === 3) count = 8;
+            else if (wave >= 4) {
+                count = 8;
+                for (let i = 4; i <= wave; i++) count += (2 + i);
+            }
+            
+            slimesToSpawn = count;
             spawnSlimes(slimesToSpawn);
             gameState = "playing";
         }
 
-        nextWaveBtn.addEventListener("click", startNextWave);
+        document.getElementById("next-wave-btn").addEventListener("click", startNextWave);
 
         function update() {
-            // BEVEGELSE (Ligger utenfor gameState-sjekken så du kan bevege deg i pauser)
+            if (gameState === "gameover") return;
+
+            // Spillerbevegelse
             if ((keys["w"] || keys["arrowup"]) && player.y - player.size/2 > 0) player.y -= player.speed;
             if ((keys["s"] || keys["arrowdown"]) && player.y + player.size/2 < canvas.height) player.y += player.speed;
             if ((keys["a"] || keys["arrowleft"]) && player.x - player.size/2 > 0) player.x -= player.speed;
             if ((keys["d"] || keys["arrowright"]) && player.x + player.size/2 < canvas.width) player.x += player.speed;
 
             if (gameState === "playing") {
+                const now = Date.now();
+                let newlySpawnedSlimes = []; // For når slimes splitter eller fuser
+
                 // Oppdater Kuler
                 for (let i = bullets.length - 1; i >= 0; i--) {
                     bullets[i].x += bullets[i].dx;
@@ -273,23 +336,77 @@
                 // Oppdater Slimes
                 for (let i = slimes.length - 1; i >= 0; i--) {
                     let s = slimes[i];
+                    if (s.dead) continue; // Hopp over hvis død i samme frame
+
+                    // Bevegelse mot spiller
                     let angle = Math.atan2(player.y - s.y, player.x - s.x);
                     s.x += Math.cos(angle) * s.speed;
                     s.y += Math.sin(angle) * s.speed;
 
+                    // 1. Skade på spiller
+                    let distToPlayer = Math.hypot(player.x - s.x, player.y - s.y);
+                    if (distToPlayer < s.size/2 + player.size/2) {
+                        if (now - player.lastHitTime >= player.iFrames) {
+                            player.hp -= s.damage;
+                            player.lastHitTime = now;
+                            updateUI();
+                            if (player.hp <= 0) {
+                                gameState = "gameover";
+                                document.getElementById("game-over").style.display = "block";
+                                return;
+                            }
+                        }
+                    }
+
+                    // 2. Kollisjon med kuler
                     for (let j = bullets.length - 1; j >= 0; j--) {
                         let b = bullets[j];
-                        let dist = Math.hypot(b.x - s.x, b.y - s.y);
-                        if (dist < s.size/2 + b.size) {
+                        let distToBullet = Math.hypot(b.x - s.x, b.y - s.y);
+                        if (distToBullet < s.size/2 + b.size) {
                             s.hp -= b.damage;
-                            bullets.splice(j, 1);
+                            bullets.splice(j, 1); // Fjern kulen
+                            
                             if (s.hp <= 0) {
-                                slimes.splice(i, 1);
-                                break;
+                                s.dead = true;
+                                // Splitte-logikk!
+                                if (s.stage > 1) {
+                                    // Spawner 2 slimes av forrige stage rett ved siden av
+                                    newlySpawnedSlimes.push(createSlime(s.x - 10, s.y, s.stage - 1));
+                                    newlySpawnedSlimes.push(createSlime(s.x + 10, s.y, s.stage - 1));
+                                }
+                                break; 
+                            }
+                        }
+                    }
+
+                    // 3. FUSING (Sjekke mot andre slimes)
+                    if (!s.dead && s.stage < 4) {
+                        for (let k = i - 1; k >= 0; k--) { // Sjekk resten av listen
+                            let otherS = slimes[k];
+                            if (otherS.dead || otherS.stage !== s.stage) continue;
+
+                            let distSlimes = Math.hypot(otherS.x - s.x, otherS.y - s.y);
+                            if (distSlimes < (s.size/2 + otherS.size/2)) { // Hvis de overlapper
+                                // Sjekk om det har gått 0.25 sek (250ms)
+                                if (now - s.lastMergeCheck >= 250 && now - otherS.lastMergeCheck >= 250) {
+                                    s.lastMergeCheck = now;
+                                    otherS.lastMergeCheck = now;
+                                    
+                                    if (Math.random() < 0.50) { // 50% sjanse
+                                        s.dead = true;
+                                        otherS.dead = true;
+                                        newlySpawnedSlimes.push(createSlime(s.x, s.y, s.stage + 1));
+                                        break; // Avslutt fusing for s, den er nå død
+                                    }
+                                }
                             }
                         }
                     }
                 }
+
+                // Rens listen for døde slimes og legg til de nye
+                slimes = slimes.filter(s => !s.dead);
+                slimes.push(...newlySpawnedSlimes);
 
                 if (slimes.length === 0 && slimesToSpawn > 0) {
                     startWavePause();
@@ -300,17 +417,34 @@
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Spiller
-            ctx.fillStyle = player.color;
-            ctx.fillRect(player.x - player.size/2, player.y - player.size/2, player.size, player.size);
+            // Tegn Spiller (Med blinke-effekt under i-frames)
+            const now = Date.now();
+            if (now - player.lastHitTime < player.iFrames) {
+                // Blinker ca hver 100ms
+                if (Math.floor(now / 100) % 2 === 0) {
+                    ctx.fillStyle = player.color;
+                    ctx.fillRect(player.x - player.size/2, player.y - player.size/2, player.size, player.size);
+                }
+            } else {
+                ctx.fillStyle = player.color;
+                ctx.fillRect(player.x - player.size/2, player.y - player.size/2, player.size, player.size);
+            }
 
-            // Slimes
-            ctx.fillStyle = "lime";
+            // Tegn Slimes
             slimes.forEach(s => {
+                ctx.fillStyle = s.color;
                 ctx.fillRect(s.x - s.size/2, s.y - s.size/2, s.size, s.size);
+                
+                // Valgfritt: En liten HP-bar over slime hvis den har tatt skade
+                if (s.hp < s.maxHp) {
+                    ctx.fillStyle = "red";
+                    ctx.fillRect(s.x - s.size/2, s.y - s.size/2 - 8, s.size, 4);
+                    ctx.fillStyle = "green";
+                    ctx.fillRect(s.x - s.size/2, s.y - s.size/2 - 8, s.size * (s.hp/s.maxHp), 4);
+                }
             });
 
-            // Kuler
+            // Tegn Kuler
             ctx.fillStyle = "yellow";
             bullets.forEach(b => {
                 ctx.beginPath();
@@ -325,6 +459,7 @@
             requestAnimationFrame(gameLoop);
         }
 
+        updateUI(); // Sett riktig HP i starten
         gameLoop();
     </script>
 </body>
