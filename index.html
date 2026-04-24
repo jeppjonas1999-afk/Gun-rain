@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Square Survival V3 - Slime Evolution</title>
+    <title>Square Survival V4 - V-Frames & Cooldowns</title>
     <style>
         body {
             margin: 0;
@@ -218,7 +218,7 @@
             }
         }
 
-        // --- SLIME LOGIKK (Stages, Stats, Splitting) ---
+        // --- SLIME LOGIKK (Stages, Stats, Splitting, Timers) ---
         function getSlimeStats(stage) {
             const colors = {1: "lime", 2: "red", 3: "purple", 4: "yellow"};
             return {
@@ -229,7 +229,9 @@
                 size: 15 * Math.pow(1.5, stage - 1),
                 color: colors[stage] || "white",
                 speed: Math.random() * 0.3 + 0.4,
-                lastMergeCheck: Date.now() // Timer for fuse-sjekk
+                lastMergeCheck: Date.now(),
+                canFuseTime: 0, // Tiden de må vente før de kan fuse (10 sekunder for splittede slimes)
+                vulnerableUntil: 0 // Tiden de insta-dør av 1 skudd (1 sek for fuse, 0.3 for split)
             };
         }
 
@@ -251,15 +253,14 @@
         }
 
         function spawnSlimes(count) {
-            // Sjanse for å spawne som en høyere stage rett fra start, øker per wave
-            let upgradeChance = Math.min(wave * 0.05, 0.4); // Maks 40% sjanse 
+            let upgradeChance = Math.min(wave * 0.05, 0.4); 
 
             for (let i = 0; i < count; i++) {
                 let x = Math.random() < 0.5 ? -30 : canvas.width + 30;
                 let y = Math.random() * canvas.height;
                 
                 let startStage = 1;
-                if (Math.random() < upgradeChance) startStage = 2; // Kan starte som stage 2
+                if (Math.random() < upgradeChance) startStage = 2;
                 
                 slimes.push(createSlime(x, y, startStage));
             }
@@ -295,7 +296,6 @@
             wave++;
             document.getElementById("wave-number").innerText = wave;
             
-            // Regn ut antall for wave
             let count = 3;
             if (wave === 2) count = 5;
             else if (wave === 3) count = 8;
@@ -322,7 +322,7 @@
 
             if (gameState === "playing") {
                 const now = Date.now();
-                let newlySpawnedSlimes = []; // For når slimes splitter eller fuser
+                let newlySpawnedSlimes = []; 
 
                 // Oppdater Kuler
                 for (let i = bullets.length - 1; i >= 0; i--) {
@@ -336,7 +336,7 @@
                 // Oppdater Slimes
                 for (let i = slimes.length - 1; i >= 0; i--) {
                     let s = slimes[i];
-                    if (s.dead) continue; // Hopp over hvis død i samme frame
+                    if (s.dead) continue;
 
                     // Bevegelse mot spiller
                     let angle = Math.atan2(player.y - s.y, player.x - s.x);
@@ -363,40 +363,57 @@
                         let b = bullets[j];
                         let distToBullet = Math.hypot(b.x - s.x, b.y - s.y);
                         if (distToBullet < s.size/2 + b.size) {
-                            s.hp -= b.damage;
                             bullets.splice(j, 1); // Fjern kulen
+                            
+                            // Sjekk Vulnerability Frames (Insta-kill)
+                            if (now < s.vulnerableUntil) {
+                                s.hp = 0; 
+                            } else {
+                                s.hp -= b.damage;
+                            }
                             
                             if (s.hp <= 0) {
                                 s.dead = true;
                                 // Splitte-logikk!
                                 if (s.stage > 1) {
-                                    // Spawner 2 slimes av forrige stage rett ved siden av
-                                    newlySpawnedSlimes.push(createSlime(s.x - 10, s.y, s.stage - 1));
-                                    newlySpawnedSlimes.push(createSlime(s.x + 10, s.y, s.stage - 1));
+                                    let s1 = createSlime(s.x - 10, s.y, s.stage - 1);
+                                    let s2 = createSlime(s.x + 10, s.y, s.stage - 1);
+                                    
+                                    // Legg til 10 sekunders fuse cooldown og 0.3 sek V-frames
+                                    s1.canFuseTime = now + 10000;
+                                    s2.canFuseTime = now + 10000;
+                                    s1.vulnerableUntil = now + 300;
+                                    s2.vulnerableUntil = now + 300;
+
+                                    newlySpawnedSlimes.push(s1, s2);
                                 }
                                 break; 
                             }
                         }
                     }
 
-                    // 3. FUSING (Sjekke mot andre slimes)
-                    if (!s.dead && s.stage < 4) {
-                        for (let k = i - 1; k >= 0; k--) { // Sjekk resten av listen
+                    // 3. FUSING (Sjekke mot andre slimes, pluss sjekke cooldown)
+                    if (!s.dead && s.stage < 4 && now > s.canFuseTime) {
+                        for (let k = i - 1; k >= 0; k--) { 
                             let otherS = slimes[k];
-                            if (otherS.dead || otherS.stage !== s.stage) continue;
+                            // Kan kun fuse hvis ingen har cooldown
+                            if (otherS.dead || otherS.stage !== s.stage || now < otherS.canFuseTime) continue;
 
                             let distSlimes = Math.hypot(otherS.x - s.x, otherS.y - s.y);
-                            if (distSlimes < (s.size/2 + otherS.size/2)) { // Hvis de overlapper
-                                // Sjekk om det har gått 0.25 sek (250ms)
+                            if (distSlimes < (s.size/2 + otherS.size/2)) { 
                                 if (now - s.lastMergeCheck >= 250 && now - otherS.lastMergeCheck >= 250) {
                                     s.lastMergeCheck = now;
                                     otherS.lastMergeCheck = now;
                                     
-                                    if (Math.random() < 0.50) { // 50% sjanse
+                                    if (Math.random() < 0.50) { 
                                         s.dead = true;
                                         otherS.dead = true;
-                                        newlySpawnedSlimes.push(createSlime(s.x, s.y, s.stage + 1));
-                                        break; // Avslutt fusing for s, den er nå død
+                                        let fusedSlime = createSlime(s.x, s.y, s.stage + 1);
+                                        // Legg til 1 sekund V-frames på den fusjonerte slimen
+                                        fusedSlime.vulnerableUntil = now + 1000; 
+                                        
+                                        newlySpawnedSlimes.push(fusedSlime);
+                                        break; 
                                     }
                                 }
                             }
@@ -404,7 +421,6 @@
                     }
                 }
 
-                // Rens listen for døde slimes og legg til de nye
                 slimes = slimes.filter(s => !s.dead);
                 slimes.push(...newlySpawnedSlimes);
 
@@ -417,10 +433,10 @@
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Tegn Spiller (Med blinke-effekt under i-frames)
             const now = Date.now();
+
+            // Tegn Spiller (Blinke-effekt under i-frames)
             if (now - player.lastHitTime < player.iFrames) {
-                // Blinker ca hver 100ms
                 if (Math.floor(now / 100) % 2 === 0) {
                     ctx.fillStyle = player.color;
                     ctx.fillRect(player.x - player.size/2, player.y - player.size/2, player.size, player.size);
@@ -432,11 +448,16 @@
 
             // Tegn Slimes
             slimes.forEach(s => {
-                ctx.fillStyle = s.color;
+                // Blinke hvit hvis de har V-frames (sårbare)
+                if (now < s.vulnerableUntil) {
+                    ctx.fillStyle = (Math.floor(now / 100) % 2 === 0) ? "white" : s.color;
+                } else {
+                    ctx.fillStyle = s.color;
+                }
                 ctx.fillRect(s.x - s.size/2, s.y - s.size/2, s.size, s.size);
                 
-                // Valgfritt: En liten HP-bar over slime hvis den har tatt skade
-                if (s.hp < s.maxHp) {
+                // HP-bar over slime hvis den har tatt skade (vises ikke på v-frames siden de er insta-kill da)
+                if (s.hp < s.maxHp && now > s.vulnerableUntil) {
                     ctx.fillStyle = "red";
                     ctx.fillRect(s.x - s.size/2, s.y - s.size/2 - 8, s.size, 4);
                     ctx.fillStyle = "green";
@@ -459,7 +480,7 @@
             requestAnimationFrame(gameLoop);
         }
 
-        updateUI(); // Sett riktig HP i starten
+        updateUI(); 
         gameLoop();
     </script>
 </body>
