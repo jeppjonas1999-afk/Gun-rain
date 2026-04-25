@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Square Survival V5 - The Merchant Update</title>
+    <title>Square Survival V6 - Rarities & Landmines</title>
     <style>
         body {
             margin: 0;
@@ -38,10 +38,9 @@
             align-items: center;
         }
 
-        /* --- NY HUD FOR ITEMS --- */
         #item-hud-container {
             position: absolute;
-            top: 5px; /* Ligger akkurat oppi den 50px tykke rammen */
+            top: 5px; 
             display: flex;
             align-items: center;
             gap: 15px;
@@ -58,19 +57,16 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            font-size: 12px;
+            font-size: 11px;
             color: white;
             text-align: center;
             line-height: 1.1;
         }
         
-        .arrow {
-            color: white;
-        }
+        .arrow { color: white; }
 
-        /* Øvrig UI */
         #top-ui-container {
-            margin-top: 60px; /* Dyttet ned litt så det ikke krasjer med rammen */
+            margin-top: 60px; 
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -132,7 +128,6 @@
             font-weight: bold;
         }
         
-        /* --- MERCHANT MODAL --- */
         #merchant-modal {
             display: none;
             position: absolute;
@@ -141,7 +136,7 @@
             transform: translate(-50%, -50%);
             background: rgba(20, 20, 20, 0.95);
             padding: 40px;
-            border: 4px solid gold;
+            border: 4px solid #8a789c; /* Lilla-grå ramme */
             border-radius: 10px;
             pointer-events: auto;
             text-align: center;
@@ -173,7 +168,7 @@
             min-height: 60px;
             margin-top: 15px;
             font-size: 18px;
-            color: gold;
+            color: white;
         }
 
         #close-merchant {
@@ -234,66 +229,66 @@
             x: canvas.width / 2, y: canvas.height / 2,
             size: 20, speed: 2, color: "cyan",
             hp: 15, maxHp: 15, lastHitTime: 0, iFrames: 500,
-            
-            // Nye stats for kort
-            weapon: "pistol", 
+            weapons: ["pistol"], // Stacker nå våpen her
             fireRateMult: 1.0 
         };
 
-        const inventory = []; // Plass til items
+        const weaponCooldowns = {
+            pistol: { lastShot: 0, baseDelay: 500 },
+            shotgun: { lastShot: 0, baseDelay: 1000 }
+        };
+
+        const inventory = []; // Lagrer objekter: { id: "navn", count: 1 }
         let selectedItemIndex = 0;
 
         const bullets = [];
+        const landmines = []; // Aktive landminer på bakken
         let slimes = [];
-        let clouds = []; // For Bullet Rain
+        let clouds = []; 
         const keys = {};
-        
-        let lastShotTime = 0;
         
         // --- MERCHANT VARIABLER ---
         const merchant = {
             active: false,
-            x: -50,
-            y: canvas.height / 3 - 50, // Litt ovenfor midten
-            size: 25,
-            state: "hidden", // hidden, walking_in, waiting, walking_out
+            x: -100,
+            y: canvas.height / 3 - 50, 
+            width: 70, // Lengre vannrett
+            height: 40, 
+            color: "#8a789c", // Grå-lilla
+            state: "hidden", 
             hasDrawn: false,
             spawnChance: 0.5
         };
 
-        // Inputs
         window.addEventListener("keydown", (e) => {
             keys[e.key.toLowerCase()] = true;
             
-            // Interaction F
             if (e.key.toLowerCase() === "f") {
                 if (merchant.state === "waiting" && !merchant.hasDrawn) {
                     let dist = Math.hypot(player.x - merchant.x, player.y - merchant.y);
-                    if (dist < 60) {
+                    if (dist < 80) {
                         document.getElementById("merchant-modal").style.display = "block";
                     }
                 }
             }
             
-            // Bruk Item C
-            if (e.key.toLowerCase() === "c") {
-                useActiveItem();
-            }
+            if (e.key.toLowerCase() === "c") useActiveItem();
 
-            // Skift Item
             if (e.key === "ArrowLeft") cycleItem(-1);
             if (e.key === "ArrowRight") cycleItem(1);
 
-            // Skyting E
             if (e.key.toLowerCase() === "e" && gameState === "playing") {
-                let baseCooldown = player.weapon === "shotgun" ? 1000 : 500;
-                let finalCooldown = baseCooldown * player.fireRateMult;
-                
                 const currentTime = Date.now();
-                if (currentTime - lastShotTime >= finalCooldown) {
-                    shootAutoAim();
-                    lastShotTime = currentTime;
-                }
+                // Gå gjennom ALLE våpen du eier, og skyt de som er klare
+                player.weapons.forEach(wpn => {
+                    let stats = weaponCooldowns[wpn];
+                    let finalCooldown = stats.baseDelay * player.fireRateMult;
+                    
+                    if (currentTime - stats.lastShot >= finalCooldown) {
+                        shootWeapon(wpn);
+                        stats.lastShot = currentTime;
+                    }
+                });
             }
         });
 
@@ -314,7 +309,8 @@
                 box.innerText = "Tom";
             } else {
                 let item = inventory[selectedItemIndex];
-                if (item === "bullet_rain") box.innerHTML = "Bullet<br>Rain";
+                if (item.id === "bullet_rain") box.innerHTML = "Bullet<br>Rain<br>x" + item.count;
+                if (item.id === "landmine") box.innerHTML = "Mine<br>x" + item.count;
             }
         }
 
@@ -322,40 +318,87 @@
             if (inventory.length === 0) return;
             let item = inventory[selectedItemIndex];
             
-            if (item === "bullet_rain") {
-                // Aktiver Bullet Rain
+            if (item.id === "bullet_rain") {
                 activateBulletRain();
-                // Bruk opp item
+                item.count--;
+            } else if (item.id === "landmine") {
+                landmines.push({ x: player.x, y: player.y, radius: 15, damage: 8 });
+                item.count--;
+            }
+
+            if (item.count <= 0) {
                 inventory.splice(selectedItemIndex, 1);
                 if (selectedItemIndex >= inventory.length) selectedItemIndex = Math.max(0, inventory.length - 1);
-                updateItemUI();
             }
+            updateItemUI();
         }
 
-        // --- KORT SYSTEM ---
+        function giveItem(id, amount) {
+            let existing = inventory.find(i => i.id === id);
+            if (existing) {
+                existing.count += amount;
+            } else {
+                inventory.push({ id: id, count: amount });
+            }
+            updateItemUI();
+        }
+
+        // --- KORT & RARITY SYSTEM ---
+        const rarities = {
+            "Common": 35,
+            "Rare": 25,
+            "Epic": 20,
+            "Mythic": 10,
+            "Legendary": 8,
+            "Exotic": 2
+        };
+
+        const rarityColors = {
+            "Common": "#aaaaaa", "Rare": "#00aaff", "Epic": "#aa00ff", 
+            "Mythic": "#ff0055", "Legendary": "#ffaa00", "Exotic": "#00ffcc"
+        };
+
         const cards = [
-            { id: "shotgun", name: "Shotgun", type: "weapon", rarity: "Rare", desc: "Skyter 5 skudd i en bue. (1 sek cooldown)" },
+            { id: "rapid_fire", name: "Rapid Fire", type: "upgrade", rarity: "Common", desc: "Reload 15% raskere." },
+            { id: "shotgun", name: "Shotgun", type: "weapon", rarity: "Rare", desc: "Legger til en hagle til arsenalet ditt." },
             { id: "bullet_rain", name: "Bullet Rain", type: "item", rarity: "Epic", desc: "Regner kuler over alle fiender i 2 sek." },
-            { id: "rapid_fire", name: "Rapid Fire", type: "upgrade", rarity: "Common", desc: "Reload 15% raskere." }
+            { id: "landmine", name: "Landmine (x5)", type: "item", rarity: "Mythic", desc: "Plasser en mine som gjør 8 piercing damage i en sirkel." }
         ];
 
         document.getElementById("deck").addEventListener("click", () => {
             if (merchant.hasDrawn) return;
             merchant.hasDrawn = true;
             
-            // Trekk tilfeldig kort
-            let randomCard = cards[Math.floor(Math.random() * cards.length)];
+            // 1. Rull for Rarity
+            let roll = Math.random() * 100;
+            let currentTarget = 0;
+            let selectedRarity = "Common";
             
+            for (let r in rarities) {
+                currentTarget += rarities[r];
+                if (roll <= currentTarget) {
+                    selectedRarity = r;
+                    break;
+                }
+            }
+
+            // 2. Finn kort i den rarityen. Hvis vi ikke har laget kort for rarityen enda, fallback til Common.
+            let availableCards = cards.filter(c => c.rarity === selectedRarity);
+            if (availableCards.length === 0) availableCards = cards.filter(c => c.rarity === "Common");
+
+            let randomCard = availableCards[Math.floor(Math.random() * availableCards.length)];
+            
+            let color = rarityColors[randomCard.rarity];
             let infoDiv = document.getElementById("drawn-card-info");
-            infoDiv.innerHTML = `Du fikk: <strong>${randomCard.name}</strong> (${randomCard.rarity})<br><span style="font-size:14px; color:#ccc;">${randomCard.desc}</span>`;
+            infoDiv.innerHTML = `Du fikk: <strong style="color:${color}">${randomCard.name}</strong> (${randomCard.rarity})<br><span style="font-size:14px; color:#ccc;">${randomCard.desc}</span>`;
             
             // Apply effekt
-            if (randomCard.id === "shotgun") player.weapon = "shotgun";
-            if (randomCard.id === "rapid_fire") player.fireRateMult *= 0.85;
-            if (randomCard.id === "bullet_rain") {
-                inventory.push("bullet_rain");
-                updateItemUI();
+            if (randomCard.id === "shotgun" && !player.weapons.includes("shotgun")) {
+                player.weapons.push("shotgun");
             }
+            if (randomCard.id === "rapid_fire") player.fireRateMult *= 0.85;
+            if (randomCard.id === "bullet_rain") giveItem("bullet_rain", 1);
+            if (randomCard.id === "landmine") giveItem("landmine", 5);
 
             document.getElementById("deck").style.pointerEvents = "none";
             document.getElementById("deck").innerText = "Tomt";
@@ -364,15 +407,14 @@
 
         document.getElementById("close-merchant").addEventListener("click", () => {
             document.getElementById("merchant-modal").style.display = "none";
-            // Klargjør til neste gang
             document.getElementById("deck").style.pointerEvents = "auto";
             document.getElementById("deck").innerText = "? Trekk ?";
             document.getElementById("drawn-card-info").innerHTML = "";
             document.getElementById("close-merchant").style.display = "none";
         });
 
-        // --- VÅPEN & ITEMS LOGIKK ---
-        function shootAutoAim() {
+        // --- VÅPEN LOGIKK ---
+        function shootWeapon(weaponType) {
             if (slimes.length === 0) return;
             let nearestSlime = null;
             let minDistance = Infinity;
@@ -388,9 +430,8 @@
             if (nearestSlime) {
                 const baseAngle = Math.atan2(nearestSlime.y - player.y, nearestSlime.x - player.x);
                 
-                if (player.weapon === "shotgun") {
-                    // 5 skudd, 45 grader spredning (fra -22.5 til +22.5 grader)
-                    let spreadAngles = [-0.39, -0.19, 0, 0.19, 0.39]; // i radianer
+                if (weaponType === "shotgun") {
+                    let spreadAngles = [-0.39, -0.19, 0, 0.19, 0.39]; 
                     for (let offset of spreadAngles) {
                         bullets.push({
                             x: player.x, y: player.y,
@@ -399,8 +440,7 @@
                             size: 4, color: "orange", damage: 1
                         });
                     }
-                } else {
-                    // Vanlig Pistol
+                } else if (weaponType === "pistol") {
                     bullets.push({
                         x: player.x, y: player.y,
                         dx: Math.cos(baseAngle) * 10,
@@ -414,12 +454,7 @@
         function activateBulletRain() {
             let now = Date.now();
             for (let s of slimes) {
-                clouds.push({
-                    x: s.x, y: s.y, // Står stille
-                    endTime: now + 2000, // Varer 2 sek
-                    lastTick: now,
-                    size: 40 // Radius for regnet
-                });
+                clouds.push({ x: s.x, y: s.y, endTime: now + 2000, lastTick: now, size: 40 });
             }
         }
 
@@ -458,16 +493,13 @@
             document.getElementById("next-wave-btn").style.visibility = "visible";
             document.getElementById("timer").innerText = timeToNextWave;
             
-            // MERCHANT SPAWN SJEKK (Hver annenhver runde, altså før wave 2, 4, 6...)
             if (wave % 2 !== 0) {
                 if (Math.random() < merchant.spawnChance) {
-                    merchant.active = true;
-                    merchant.state = "walking_in";
-                    merchant.x = -50; // Start utenfor
-                    merchant.hasDrawn = false;
-                    merchant.spawnChance = 0.5; // Reset sjanse
+                    merchant.active = true; merchant.state = "walking_in";
+                    merchant.x = -100; merchant.hasDrawn = false;
+                    merchant.spawnChance = 0.5; 
                 } else {
-                    merchant.spawnChance += 0.1; // Øk sjanse til neste gang
+                    merchant.spawnChance += 0.1; 
                 }
             }
 
@@ -476,12 +508,8 @@
                 document.getElementById("timer").innerText = timeToNextWave;
                 
                 if (timeToNextWave <= 0) {
-                    if (document.getElementById("auto-start").checked) {
-                        startNextWave();
-                    } else {
-                        clearInterval(waitInterval);
-                        document.getElementById("timer").innerText = "Klar!";
-                    }
+                    if (document.getElementById("auto-start").checked) startNextWave();
+                    else { clearInterval(waitInterval); document.getElementById("timer").innerText = "Klar!"; }
                 }
             }, 1000);
         }
@@ -490,7 +518,6 @@
             clearInterval(waitInterval);
             document.getElementById("next-wave-btn").style.visibility = "hidden";
             
-            // Få merchant til å gå vekk
             if (merchant.active && merchant.state === "waiting") {
                 merchant.state = "walking_out";
                 document.getElementById("merchant-modal").style.display = "none";
@@ -500,65 +527,61 @@
             document.getElementById("wave-number").innerText = wave;
             
             let count = 3;
-            if (wave === 2) count = 5;
-            else if (wave === 3) count = 8;
-            else if (wave >= 4) {
-                count = 8;
-                for (let i = 4; i <= wave; i++) count += (2 + i);
-            }
+            if (wave === 2) count = 5; else if (wave === 3) count = 8;
+            else if (wave >= 4) { count = 8; for (let i = 4; i <= wave; i++) count += (2 + i); }
             
-            slimesToSpawn = count;
-            spawnSlimes(slimesToSpawn);
+            slimesToSpawn = count; spawnSlimes(slimesToSpawn);
             gameState = "playing";
         }
 
         document.getElementById("next-wave-btn").addEventListener("click", startNextWave);
 
+        // Felles funksjon for å skade slimes
+        function damageSlime(s, amount, now, newlySpawnedSlimes) {
+            if (now < s.vulnerableUntil) s.hp = 0; 
+            else s.hp -= amount;
+            
+            if (s.hp <= 0 && !s.dead) {
+                s.dead = true;
+                if (s.stage > 1) {
+                    let s1 = createSlime(s.x - 10, s.y, s.stage - 1);
+                    let s2 = createSlime(s.x + 10, s.y, s.stage - 1);
+                    s1.canFuseTime = now + 10000; s2.canFuseTime = now + 10000;
+                    s1.vulnerableUntil = now + 300; s2.vulnerableUntil = now + 300;
+                    newlySpawnedSlimes.push(s1, s2);
+                }
+            }
+        }
+
         function update() {
             const now = Date.now();
 
-            // BEVEGELSE
             if ((keys["w"] || keys["arrowup"]) && player.y - player.size/2 > 0) player.y -= player.speed;
             if ((keys["s"] || keys["arrowdown"]) && player.y + player.size/2 < canvas.height) player.y += player.speed;
-            
-            // Ikke bruk venstre/høyre for bevegelse hvis vi vil at de bare skal bytte items. 
-            // Siden det er kjedelig å miste A og D, lar jeg A/D styre bevegelse uansett, og piltastene bare for items.
             if ((keys["a"]) && player.x - player.size/2 > 0) player.x -= player.speed;
             if ((keys["d"]) && player.x + player.size/2 < canvas.width) player.x += player.speed;
 
-            // MERCHANT LOGIKK
             if (merchant.active) {
                 if (merchant.state === "walking_in") {
                     merchant.x += 2;
-                    if (merchant.x >= canvas.width / 2) {
-                        merchant.state = "waiting";
-                    }
+                    if (merchant.x >= canvas.width / 2) merchant.state = "waiting";
                 } else if (merchant.state === "walking_out") {
                     merchant.x += 3;
-                    if (merchant.x > canvas.width + 50) {
-                        merchant.active = false;
-                        merchant.state = "hidden";
+                    if (merchant.x > canvas.width + 100) {
+                        merchant.active = false; merchant.state = "hidden";
                     }
                 }
             }
 
-            // CLOUDS LOGIKK (Bullet Rain)
             for (let i = clouds.length - 1; i >= 0; i--) {
                 let c = clouds[i];
-                if (now > c.endTime) {
-                    clouds.splice(i, 1);
-                    continue;
-                }
-                
-                // Tick skade hver 0.15s (150ms)
+                if (now > c.endTime) { clouds.splice(i, 1); continue; }
                 if (now - c.lastTick >= 150) {
                     c.lastTick = now;
-                    // Sjekk slimes under skyen
                     for (let s of slimes) {
-                        let dist = Math.hypot(s.x - c.x, s.y - c.y);
-                        if (dist < c.size) {
+                        if (Math.hypot(s.x - c.x, s.y - c.y) < c.size) {
                             s.hp -= 0.5;
-                            if (s.hp <= 0) s.dead = true; // Forenklet død for regn
+                            if (s.hp <= 0) s.dead = true; 
                         }
                     }
                 }
@@ -568,10 +591,29 @@
                 let newlySpawnedSlimes = []; 
 
                 for (let i = bullets.length - 1; i >= 0; i--) {
-                    bullets[i].x += bullets[i].dx;
-                    bullets[i].y += bullets[i].dy;
+                    bullets[i].x += bullets[i].dx; bullets[i].y += bullets[i].dy;
                     if (bullets[i].x < 0 || bullets[i].x > canvas.width || bullets[i].y < 0 || bullets[i].y > canvas.height) {
                         bullets.splice(i, 1);
+                    }
+                }
+
+                // Landminer Eksplosjon Sjekk
+                for (let i = landmines.length - 1; i >= 0; i--) {
+                    let m = landmines[i];
+                    let triggered = false;
+                    for (let s of slimes) {
+                        if (!s.dead && Math.hypot(s.x - m.x, s.y - m.y) < s.size/2 + m.radius) {
+                            triggered = true; break;
+                        }
+                    }
+                    if (triggered) {
+                        // AoE Piercing skade i radius (70px)
+                        for (let s of slimes) {
+                            if (!s.dead && Math.hypot(s.x - m.x, s.y - m.y) < 70) {
+                                damageSlime(s, m.damage, now, newlySpawnedSlimes);
+                            }
+                        }
+                        landmines.splice(i, 1); // Fjern minen
                     }
                 }
 
@@ -580,56 +622,35 @@
                     if (s.dead) continue;
 
                     let angle = Math.atan2(player.y - s.y, player.x - s.x);
-                    s.x += Math.cos(angle) * s.speed;
-                    s.y += Math.sin(angle) * s.speed;
+                    s.x += Math.cos(angle) * s.speed; s.y += Math.sin(angle) * s.speed;
 
-                    // Skade på spiller
                     let distToPlayer = Math.hypot(player.x - s.x, player.y - s.y);
                     if (distToPlayer < s.size/2 + player.size/2) {
                         if (now - player.lastHitTime >= player.iFrames) {
-                            player.hp -= s.damage;
-                            player.lastHitTime = now;
+                            player.hp -= s.damage; player.lastHitTime = now;
                             document.getElementById("hp-text").innerText = player.hp;
                             document.getElementById("health-bar-fill").style.width = (player.hp / player.maxHp) * 100 + "%";
-                            if (player.hp <= 0) location.reload(); // Enkel Game Over reload
+                            if (player.hp <= 0) location.reload(); 
                         }
                     }
 
-                    // Kollisjon med kuler
                     for (let j = bullets.length - 1; j >= 0; j--) {
                         let b = bullets[j];
-                        let distToBullet = Math.hypot(b.x - s.x, b.y - s.y);
-                        if (distToBullet < s.size/2 + b.size) {
+                        if (Math.hypot(b.x - s.x, b.y - s.y) < s.size/2 + b.size) {
                             bullets.splice(j, 1); 
-                            
-                            if (now < s.vulnerableUntil) s.hp = 0; 
-                            else s.hp -= b.damage;
-                            
-                            if (s.hp <= 0) {
-                                s.dead = true;
-                                if (s.stage > 1) {
-                                    let s1 = createSlime(s.x - 10, s.y, s.stage - 1);
-                                    let s2 = createSlime(s.x + 10, s.y, s.stage - 1);
-                                    s1.canFuseTime = now + 10000; s2.canFuseTime = now + 10000;
-                                    s1.vulnerableUntil = now + 300; s2.vulnerableUntil = now + 300;
-                                    newlySpawnedSlimes.push(s1, s2);
-                                }
-                                break; 
-                            }
+                            damageSlime(s, b.damage, now, newlySpawnedSlimes);
+                            if (s.dead) break; 
                         }
                     }
 
-                    // FUSING
                     if (!s.dead && s.stage < 4 && now > s.canFuseTime) {
                         for (let k = i - 1; k >= 0; k--) { 
                             let otherS = slimes[k];
                             if (otherS.dead || otherS.stage !== s.stage || now < otherS.canFuseTime) continue;
 
-                            let distSlimes = Math.hypot(otherS.x - s.x, otherS.y - s.y);
-                            if (distSlimes < (s.size/2 + otherS.size/2)) { 
+                            if (Math.hypot(otherS.x - s.x, otherS.y - s.y) < (s.size/2 + otherS.size/2)) { 
                                 if (now - s.lastMergeCheck >= 250 && now - otherS.lastMergeCheck >= 250) {
-                                    s.lastMergeCheck = now;
-                                    otherS.lastMergeCheck = now;
+                                    s.lastMergeCheck = now; otherS.lastMergeCheck = now;
                                     if (Math.random() < 0.50) { 
                                         s.dead = true; otherS.dead = true;
                                         let fused = createSlime(s.x, s.y, s.stage + 1);
@@ -646,9 +667,7 @@
                 slimes = slimes.filter(s => !s.dead);
                 slimes.push(...newlySpawnedSlimes);
 
-                if (slimes.length === 0 && slimesToSpawn > 0) {
-                    startWavePause();
-                }
+                if (slimes.length === 0 && slimesToSpawn > 0) startWavePause();
             }
         }
 
@@ -656,41 +675,36 @@
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             const now = Date.now();
 
-            // Tegn Clouds (Regn)
             ctx.fillStyle = "rgba(100, 150, 255, 0.3)";
             ctx.strokeStyle = "rgba(100, 150, 255, 0.8)";
             ctx.lineWidth = 2;
             clouds.forEach(c => {
-                ctx.beginPath();
-                ctx.arc(c.x, c.y, c.size, 0, Math.PI*2);
-                ctx.fill();
-                ctx.stroke();
-                
-                // Animerte regndråper i skyen
+                ctx.beginPath(); ctx.arc(c.x, c.y, c.size, 0, Math.PI*2); ctx.fill(); ctx.stroke();
                 ctx.fillStyle = "white";
-                for(let i=0; i<3; i++) {
-                    ctx.fillRect(c.x - c.size/2 + Math.random()*c.size, c.y - c.size/2 + Math.random()*c.size, 2, 6);
-                }
-                ctx.fillStyle = "rgba(100, 150, 255, 0.3)"; // reset fill
+                for(let i=0; i<3; i++) ctx.fillRect(c.x - c.size/2 + Math.random()*c.size, c.y - c.size/2 + Math.random()*c.size, 2, 6);
+                ctx.fillStyle = "rgba(100, 150, 255, 0.3)"; 
             });
 
-            // Tegn Merchant
+            landmines.forEach(m => {
+                ctx.fillStyle = "#333";
+                ctx.beginPath(); ctx.arc(m.x, m.y, m.radius, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = (Math.floor(now / 300) % 2 === 0) ? "red" : "darkred";
+                ctx.beginPath(); ctx.arc(m.x, m.y, m.radius / 2.5, 0, Math.PI * 2); ctx.fill();
+            });
+
             if (merchant.active) {
-                ctx.fillStyle = "gold";
-                ctx.fillRect(merchant.x - merchant.size/2, merchant.y - merchant.size/2, merchant.size, merchant.size);
-                ctx.fillStyle = "black";
+                ctx.fillStyle = merchant.color;
+                ctx.fillRect(merchant.x - merchant.width/2, merchant.y - merchant.height/2, merchant.width, merchant.height);
+                ctx.fillStyle = "white";
                 ctx.font = "20px Arial";
                 ctx.fillText("M", merchant.x - 8, merchant.y + 7);
                 
-                // Interaction hint
                 if (merchant.state === "waiting" && !merchant.hasDrawn) {
-                    ctx.fillStyle = "white";
-                    ctx.font = "14px Arial";
-                    ctx.fillText("[F] Shop", merchant.x - 25, merchant.y - 20);
+                    ctx.fillStyle = "white"; ctx.font = "14px Arial";
+                    ctx.fillText("[F] Shop", merchant.x - 25, merchant.y - 30);
                 }
             }
 
-            // Tegn Spiller
             if (now - player.lastHitTime < player.iFrames) {
                 if (Math.floor(now / 100) % 2 === 0) {
                     ctx.fillStyle = player.color;
@@ -701,7 +715,6 @@
                 ctx.fillRect(player.x - player.size/2, player.y - player.size/2, player.size, player.size);
             }
 
-            // Tegn Slimes
             slimes.forEach(s => {
                 ctx.fillStyle = (now < s.vulnerableUntil && Math.floor(now / 100) % 2 === 0) ? "white" : s.color;
                 ctx.fillRect(s.x - s.size/2, s.y - s.size/2, s.size, s.size);
@@ -712,7 +725,6 @@
                 }
             });
 
-            // Tegn Kuler
             bullets.forEach(b => {
                 ctx.fillStyle = b.color;
                 ctx.beginPath(); ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2); ctx.fill();
