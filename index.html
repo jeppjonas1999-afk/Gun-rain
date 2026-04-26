@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Square Survival V6 - Rarities & Landmines</title>
+    <title>Square Survival V7 - Animations & SMG</title>
     <style>
         body {
             margin: 0;
@@ -229,20 +229,21 @@
             x: canvas.width / 2, y: canvas.height / 2,
             size: 20, speed: 2, color: "cyan",
             hp: 15, maxHp: 15, lastHitTime: 0, iFrames: 500,
-            weapons: ["pistol"], // Stacker nå våpen her
+            weapons: ["pistol"], 
             fireRateMult: 1.0 
         };
 
         const weaponCooldowns = {
             pistol: { lastShot: 0, baseDelay: 500 },
-            shotgun: { lastShot: 0, baseDelay: 1000 }
+            shotgun: { lastShot: 0, baseDelay: 1000 },
+            smg: { lastShot: 0, baseDelay: 100 } // NY: SMG delay på 0.1s
         };
 
-        const inventory = []; // Lagrer objekter: { id: "navn", count: 1 }
+        const inventory = []; 
         let selectedItemIndex = 0;
 
         const bullets = [];
-        const landmines = []; // Aktive landminer på bakken
+        const landmines = []; 
         let slimes = [];
         let clouds = []; 
         const keys = {};
@@ -252,12 +253,11 @@
             active: false,
             x: -100,
             y: canvas.height / 3 - 50, 
-            width: 70, // Lengre vannrett
+            width: 70, 
             height: 40, 
-            color: "#8a789c", // Grå-lilla
+            color: "#8a789c", 
             state: "hidden", 
-            hasDrawn: false,
-            spawnChance: 0.8
+            hasDrawn: false
         };
 
         window.addEventListener("keydown", (e) => {
@@ -279,7 +279,6 @@
 
             if (e.key.toLowerCase() === "e" && gameState === "playing") {
                 const currentTime = Date.now();
-                // Gå gjennom ALLE våpen du eier, og skyt de som er klare
                 player.weapons.forEach(wpn => {
                     let stats = weaponCooldowns[wpn];
                     let finalCooldown = stats.baseDelay * player.fireRateMult;
@@ -344,23 +343,13 @@
         }
 
         // --- KORT & RARITY SYSTEM ---
-        const rarities = {
-            "Common": 35,
-            "Rare": 25,
-            "Epic": 20,
-            "Mythic": 10,
-            "Legendary": 8,
-            "Exotic": 2
-        };
-
-        const rarityColors = {
-            "Common": "#aaaaaa", "Rare": "#00aaff", "Epic": "#aa00ff", 
-            "Mythic": "#ff0055", "Legendary": "#ffaa00", "Exotic": "#00ffcc"
-        };
+        const rarities = { "Common": 35, "Rare": 25, "Epic": 20, "Mythic": 10, "Legendary": 8, "Exotic": 2 };
+        const rarityColors = { "Common": "#aaaaaa", "Rare": "#00aaff", "Epic": "#aa00ff", "Mythic": "#ff0055", "Legendary": "#ffaa00", "Exotic": "#00ffcc" };
 
         const cards = [
             { id: "rapid_fire", name: "Rapid Fire", type: "upgrade", rarity: "Common", desc: "Reload 15% raskere." },
             { id: "shotgun", name: "Shotgun", type: "weapon", rarity: "Rare", desc: "Legger til en hagle til arsenalet ditt." },
+            { id: "smg", name: "SMG", type: "weapon", rarity: "Epic", desc: "Skyter lynraskt (0.1s), men gjør bare 0.25 skade per skudd." }, // NYTT KORT
             { id: "bullet_rain", name: "Bullet Rain", type: "item", rarity: "Epic", desc: "Regner kuler over alle fiender i 2 sek." },
             { id: "landmine", name: "Landmine (x5)", type: "item", rarity: "Mythic", desc: "Plasser en mine som gjør 8 piercing damage i en sirkel." }
         ];
@@ -369,7 +358,6 @@
             if (merchant.hasDrawn) return;
             merchant.hasDrawn = true;
             
-            // 1. Rull for Rarity
             let roll = Math.random() * 100;
             let currentTarget = 0;
             let selectedRarity = "Common";
@@ -382,7 +370,6 @@
                 }
             }
 
-            // 2. Finn kort i den rarityen. Hvis vi ikke har laget kort for rarityen enda, fallback til Common.
             let availableCards = cards.filter(c => c.rarity === selectedRarity);
             if (availableCards.length === 0) availableCards = cards.filter(c => c.rarity === "Common");
 
@@ -392,10 +379,8 @@
             let infoDiv = document.getElementById("drawn-card-info");
             infoDiv.innerHTML = `Du fikk: <strong style="color:${color}">${randomCard.name}</strong> (${randomCard.rarity})<br><span style="font-size:14px; color:#ccc;">${randomCard.desc}</span>`;
             
-            // Apply effekt
-            if (randomCard.id === "shotgun" && !player.weapons.includes("shotgun")) {
-                player.weapons.push("shotgun");
-            }
+            if (randomCard.id === "shotgun" && !player.weapons.includes("shotgun")) player.weapons.push("shotgun");
+            if (randomCard.id === "smg" && !player.weapons.includes("smg")) player.weapons.push("smg");
             if (randomCard.id === "rapid_fire") player.fireRateMult *= 0.85;
             if (randomCard.id === "bullet_rain") giveItem("bullet_rain", 1);
             if (randomCard.id === "landmine") giveItem("landmine", 5);
@@ -434,18 +419,20 @@
                     let spreadAngles = [-0.39, -0.19, 0, 0.19, 0.39]; 
                     for (let offset of spreadAngles) {
                         bullets.push({
-                            x: player.x, y: player.y,
-                            dx: Math.cos(baseAngle + offset) * 10,
-                            dy: Math.sin(baseAngle + offset) * 10,
+                            x: player.x, y: player.y, dx: Math.cos(baseAngle + offset) * 10, dy: Math.sin(baseAngle + offset) * 10,
                             size: 4, color: "orange", damage: 1
                         });
                     }
                 } else if (weaponType === "pistol") {
                     bullets.push({
-                        x: player.x, y: player.y,
-                        dx: Math.cos(baseAngle) * 10,
-                        dy: Math.sin(baseAngle) * 10,
+                        x: player.x, y: player.y, dx: Math.cos(baseAngle) * 10, dy: Math.sin(baseAngle) * 10,
                         size: 5, color: "yellow", damage: 1
+                    });
+                } else if (weaponType === "smg") {
+                    // SMG: Raskere kuler, liten skade, litt hvit/grå farge
+                    bullets.push({
+                        x: player.x, y: player.y, dx: Math.cos(baseAngle) * 12, dy: Math.sin(baseAngle) * 12,
+                        size: 3, color: "white", damage: 0.25
                     });
                 }
             }
@@ -453,19 +440,26 @@
 
         function activateBulletRain() {
             let now = Date.now();
-            for (let s of slimes) {
-                clouds.push({ x: s.x, y: s.y, endTime: now + 2000, lastTick: now, size: 40 });
-            }
+            for (let s of slimes) clouds.push({ x: s.x, y: s.y, endTime: now + 2000, lastTick: now, size: 40 });
         }
 
-        // --- SLIME LOGIKK ---
+        // --- SLIME LOGIKK (Farger & RGB for animasjon) ---
+        const stageColors = {
+            1: {r: 0, g: 255, b: 0},     // lime
+            2: {r: 255, g: 0, b: 0},     // red
+            3: {r: 128, g: 0, b: 128},   // purple
+            4: {r: 255, g: 255, b: 0}    // yellow
+        };
+
         function getSlimeStats(stage) {
-            const colors = {1: "lime", 2: "red", 3: "purple", 4: "yellow"};
+            let col = stageColors[stage] || {r: 255, g: 255, b: 255};
+            let colorString = `rgb(${col.r}, ${col.g}, ${col.b})`;
             return {
                 stage: stage, hp: 1 + stage, maxHp: 1 + stage, damage: stage,
                 size: 15 * Math.pow(1.5, stage - 1),
-                color: colors[stage] || "white", speed: Math.random() * 0.3 + 0.4,
-                lastMergeCheck: Date.now(), canFuseTime: 0, vulnerableUntil: 0
+                color: colorString, rgb: col, speed: Math.random() * 0.3 + 0.4,
+                lastMergeCheck: Date.now(), canFuseTime: 0, vulnerableUntil: 0,
+                isFusing: false // Ny for animasjon
             };
         }
         function createSlime(x, y, stage) { return { x: x, y: y, ...getSlimeStats(stage) }; }
@@ -493,20 +487,15 @@
             document.getElementById("next-wave-btn").style.visibility = "visible";
             document.getElementById("timer").innerText = timeToNextWave;
             
-            if (wave % 2 !== 0) {
-                if (Math.random() < merchant.spawnChance) {
-                    merchant.active = true; merchant.state = "walking_in";
-                    merchant.x = -100; merchant.hasDrawn = false;
-                    merchant.spawnChance = 0.5; 
-                } else {
-                    merchant.spawnChance += 0.1; 
-                }
-            }
+            // Merchant spawner NÅ HVER RUNDE
+            merchant.active = true; 
+            merchant.state = "walking_in";
+            merchant.x = -100; 
+            merchant.hasDrawn = false;
 
             waitInterval = setInterval(() => {
                 timeToNextWave--;
                 document.getElementById("timer").innerText = timeToNextWave;
-                
                 if (timeToNextWave <= 0) {
                     if (document.getElementById("auto-start").checked) startNextWave();
                     else { clearInterval(waitInterval); document.getElementById("timer").innerText = "Klar!"; }
@@ -536,14 +525,13 @@
 
         document.getElementById("next-wave-btn").addEventListener("click", startNextWave);
 
-        // Felles funksjon for å skade slimes
         function damageSlime(s, amount, now, newlySpawnedSlimes) {
-            if (now < s.vulnerableUntil) s.hp = 0; 
-            else s.hp -= amount;
+            if (now < s.vulnerableUntil) s.hp = 0; // Gammel logic for deling
+            else s.hp -= amount; // Tar skade normalt (også mens den fuser!)
             
             if (s.hp <= 0 && !s.dead) {
                 s.dead = true;
-                if (s.stage > 1) {
+                if (s.stage > 1 && !s.isFusing) { // Deler seg bare hvis den IKKE er midt i en animasjon
                     let s1 = createSlime(s.x - 10, s.y, s.stage - 1);
                     let s2 = createSlime(s.x + 10, s.y, s.stage - 1);
                     s1.canFuseTime = now + 10000; s2.canFuseTime = now + 10000;
@@ -567,9 +555,7 @@
                     if (merchant.x >= canvas.width / 2) merchant.state = "waiting";
                 } else if (merchant.state === "walking_out") {
                     merchant.x += 3;
-                    if (merchant.x > canvas.width + 100) {
-                        merchant.active = false; merchant.state = "hidden";
-                    }
+                    if (merchant.x > canvas.width + 100) { merchant.active = false; merchant.state = "hidden"; }
                 }
             }
 
@@ -597,23 +583,17 @@
                     }
                 }
 
-                // Landminer Eksplosjon Sjekk
                 for (let i = landmines.length - 1; i >= 0; i--) {
                     let m = landmines[i];
                     let triggered = false;
                     for (let s of slimes) {
-                        if (!s.dead && Math.hypot(s.x - m.x, s.y - m.y) < s.size/2 + m.radius) {
-                            triggered = true; break;
-                        }
+                        if (!s.dead && Math.hypot(s.x - m.x, s.y - m.y) < s.size/2 + m.radius) { triggered = true; break; }
                     }
                     if (triggered) {
-                        // AoE Piercing skade i radius (70px)
                         for (let s of slimes) {
-                            if (!s.dead && Math.hypot(s.x - m.x, s.y - m.y) < 70) {
-                                damageSlime(s, m.damage, now, newlySpawnedSlimes);
-                            }
+                            if (!s.dead && Math.hypot(s.x - m.x, s.y - m.y) < 70) damageSlime(s, m.damage, now, newlySpawnedSlimes);
                         }
-                        landmines.splice(i, 1); // Fjern minen
+                        landmines.splice(i, 1);
                     }
                 }
 
@@ -621,9 +601,54 @@
                     let s = slimes[i];
                     if (s.dead) continue;
 
-                    let angle = Math.atan2(player.y - s.y, player.x - s.x);
-                    s.x += Math.cos(angle) * s.speed; s.y += Math.sin(angle) * s.speed;
+                    // BEVEGELSE & ANIMASJON
+                    if (s.isFusing) {
+                        let progress = (now - s.fuseStartTime) / 2000; // 2 sekunder animasjon
+                        if (progress >= 1) {
+                            // Fullfør fusing
+                            s.isFusing = false;
+                            s.stage = s.targetStage;
+                            let stats = getSlimeStats(s.stage);
+                            s.hp = stats.maxHp; 
+                            s.maxHp = stats.maxHp;
+                            s.damage = stats.damage;
+                            s.size = stats.size;
+                            s.color = stats.color;
+                            s.rgb = stats.rgb;
+                            s.speed = stats.speed;
+                        } else {
+                            // Interpoler (blend) størrelse og farge mens den står stille
+                            s.size = s.oldSize + (s.targetSize - s.oldSize) * progress;
+                            let r = s.oldRgb.r + (s.targetRgb.r - s.oldRgb.r) * progress;
+                            let g = s.oldRgb.g + (s.targetRgb.g - s.oldRgb.g) * progress;
+                            let b = s.oldRgb.b + (s.targetRgb.b - s.oldRgb.b) * progress;
+                            s.color = `rgb(${Math.floor(r)},${Math.floor(g)},${Math.floor(b)})`;
+                        }
+                    } else {
+                        // Normal bevegelse
+                        let angle = Math.atan2(player.y - s.y, player.x - s.x);
+                        s.x += Math.cos(angle) * s.speed; s.y += Math.sin(angle) * s.speed;
+                    }
 
+                    // FYSISK KOLLISJON MELLOM SLIMES (De dytter hverandre)
+                    for (let j = 0; j < slimes.length; j++) {
+                        if (i !== j && !slimes[j].dead) {
+                            let otherS = slimes[j];
+                            let dist = Math.hypot(s.x - otherS.x, s.y - otherS.y);
+                            let minDist = s.size/2 + otherS.size/2;
+                            if (dist < minDist && dist > 0.1) {
+                                let overlap = minDist - dist;
+                                let pushAngle = Math.atan2(s.y - otherS.y, s.x - otherS.x);
+                                // Dytt begge to hver sin vei
+                                s.x += Math.cos(pushAngle) * (overlap / 2);
+                                s.y += Math.sin(pushAngle) * (overlap / 2);
+                                otherS.x -= Math.cos(pushAngle) * (overlap / 2);
+                                otherS.y -= Math.sin(pushAngle) * (overlap / 2);
+                            }
+                        }
+                    }
+
+                    // Spiller kollisjon
                     let distToPlayer = Math.hypot(player.x - s.x, player.y - s.y);
                     if (distToPlayer < s.size/2 + player.size/2) {
                         if (now - player.lastHitTime >= player.iFrames) {
@@ -634,6 +659,7 @@
                         }
                     }
 
+                    // Kule kollisjon
                     for (let j = bullets.length - 1; j >= 0; j--) {
                         let b = bullets[j];
                         if (Math.hypot(b.x - s.x, b.y - s.y) < s.size/2 + b.size) {
@@ -643,19 +669,26 @@
                         }
                     }
 
-                    if (!s.dead && s.stage < 4 && now > s.canFuseTime) {
+                    // FUSING LOGIKK (Start animasjon)
+                    if (!s.dead && !s.isFusing && s.stage < 4 && now > s.canFuseTime) {
                         for (let k = i - 1; k >= 0; k--) { 
                             let otherS = slimes[k];
-                            if (otherS.dead || otherS.stage !== s.stage || now < otherS.canFuseTime) continue;
+                            if (otherS.dead || otherS.isFusing || otherS.stage !== s.stage || now < otherS.canFuseTime) continue;
 
                             if (Math.hypot(otherS.x - s.x, otherS.y - s.y) < (s.size/2 + otherS.size/2)) { 
                                 if (now - s.lastMergeCheck >= 250 && now - otherS.lastMergeCheck >= 250) {
                                     s.lastMergeCheck = now; otherS.lastMergeCheck = now;
                                     if (Math.random() < 0.50) { 
-                                        s.dead = true; otherS.dead = true;
-                                        let fused = createSlime(s.x, s.y, s.stage + 1);
-                                        fused.vulnerableUntil = now + 1000; 
-                                        newlySpawnedSlimes.push(fused);
+                                        // Spis den andre slimen, og start animasjonen for s
+                                        otherS.dead = true; 
+                                        
+                                        s.isFusing = true;
+                                        s.fuseStartTime = now;
+                                        s.targetStage = s.stage + 1;
+                                        s.oldSize = s.size;
+                                        s.targetSize = 15 * Math.pow(1.5, s.targetStage - 1);
+                                        s.oldRgb = s.rgb;
+                                        s.targetRgb = stageColors[s.targetStage];
                                         break; 
                                     }
                                 }
@@ -719,9 +752,12 @@
                 ctx.fillStyle = (now < s.vulnerableUntil && Math.floor(now / 100) % 2 === 0) ? "white" : s.color;
                 ctx.fillRect(s.x - s.size/2, s.y - s.size/2, s.size, s.size);
                 
+                // Tegn HP bar over slimen
                 if (s.hp < s.maxHp && now > s.vulnerableUntil) {
                     ctx.fillStyle = "red"; ctx.fillRect(s.x - s.size/2, s.y - s.size/2 - 8, s.size, 4);
-                    ctx.fillStyle = "green"; ctx.fillRect(s.x - s.size/2, s.y - s.size/2 - 8, s.size * (s.hp/s.maxHp), 4);
+                    // Sikre at den ikke tegner HP bar under 0% hvis den dør av SMG
+                    let hpPercent = Math.max(0, s.hp / s.maxHp); 
+                    ctx.fillStyle = "green"; ctx.fillRect(s.x - s.size/2, s.y - s.size/2 - 8, s.size * hpPercent, 4);
                 }
             });
 
